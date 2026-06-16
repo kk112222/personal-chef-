@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 私人厨师</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; height: 100vh; background: linear-gradient(135deg, #fef3c7, #fed7aa, #fecaca); display: flex; }
+
+/* 左侧会话列表 */
+.sidebar { width: 260px; background: rgba(255,255,255,0.85); backdrop-filter: blur(12px); border-right: 1px solid rgba(0,0,0,0.08); display: flex; flex-direction: column; flex-shrink: 0; }
+.sidebar-header { padding: 16px; border-bottom: 1px solid rgba(0,0,0,0.06); display: flex; justify-content: space-between; align-items: center; }
+.sidebar-header h2 { font-size: 14px; color: #666; font-weight: 600; }
+.btn-new { padding: 6px 12px; background: linear-gradient(135deg, #f97316, #ef4444); color: white; border: none; border-radius: 8px; font-size: 12px; cursor: pointer; }
+.thread-list { flex: 1; overflow-y: auto; padding: 8px; }
+.thread-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; color: #333; margin-bottom: 2px; display: flex; align-items: center; gap: 8px; }
+.thread-item:hover { background: rgba(0,0,0,0.05); }
+.thread-item.active { background: rgba(249,115,22,0.1); color: #ea580c; font-weight: 500; }
+.thread-item .icon { font-size: 12px; }
+.thread-item .delete-btn { margin-left: auto; background: none; border: none; color: #999; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; }
+.thread-item .delete-btn:hover { background: rgba(0,0,0,0.1); color: #ef4444; }
+
+/* 主聊天区域 */
+.main { flex: 1; display: flex; flex-direction: column; max-width: calc(100% - 260px); }
+.chat-header { padding: 16px 24px; background: rgba(255,255,255,0.6); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(0,0,0,0.06); display: flex; align-items: center; gap: 12px; }
+.chat-header .avatar { width: 36px; height: 36px; background: linear-gradient(135deg, #f97316, #ef4444); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: white; font-size: 18px; }
+.chat-header h1 { font-size: 16px; font-weight: 600; color: #333; }
+.chat-header p { font-size: 12px; color: #999; }
+
+.messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; scroll-behavior: smooth; }
+.welcome { text-align: center; padding: 60px 20px; color: #999; }
+.welcome .big-icon { font-size: 64px; margin-bottom: 16px; }
+.welcome h3 { font-size: 18px; color: #666; margin-bottom: 8px; }
+.welcome p { font-size: 14px; }
+
+.message { max-width: 80%; padding: 12px 16px; border-radius: 16px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; animation: fadeIn 0.3s; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.message.user { align-self: flex-end; background: linear-gradient(135deg, #f97316, #ef4444); color: white; border-bottom-right-radius: 4px; }
+.message.assistant { align-self: flex-start; background: white; color: #333; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-bottom-left-radius: 4px; }
+.message.assistant.loading { animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.message img { max-width: 100%; border-radius: 8px; margin-top: 8px; }
+
+/* 输入区域 */
+.input-area { padding: 16px 24px; background: rgba(255,255,255,0.6); backdrop-filter: blur(8px); border-top: 1px solid rgba(0,0,0,0.06); }
+.input-wrapper { max-width: 800px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; background: white; border-radius: 16px; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border: 2px solid transparent; transition: border-color 0.2s; }
+.input-wrapper:focus-within { border-color: #f97316; }
+.input-wrapper textarea { flex: 1; border: none; outline: none; resize: none; padding: 4px 0; font-size: 14px; font-family: inherit; line-height: 1.5; max-height: 120px; }
+.btn-img { background: none; border: none; padding: 6px; cursor: pointer; color: #999; border-radius: 8px; font-size: 20px; }
+.btn-img:hover { background: rgba(0,0,0,0.05); color: #f97316; }
+.btn-send { background: linear-gradient(135deg, #f97316, #ef4444); color: white; border: none; padding: 8px 16px; border-radius: 10px; cursor: pointer; font-size: 14px; }
+.btn-send:disabled { background: #ddd; cursor: not-allowed; }
+
+.img-preview { max-width: 120px; max-height: 80px; border-radius: 8px; margin: 4px 0; object-fit: cover; }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- 左侧会话列表 -->
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h2>💬 历史会话</h2>
+    <button class="btn-new" onclick="newThread()">＋ 新建</button>
+  </div>
+  <div class="thread-list" id="threadList">
+    <div style="text-align:center;color:#ccc;padding:20px;font-size:13px;">加载中...</div>
+  </div>
+</div>
+
+<!-- 主区域 -->
+<div class="main">
+  <div class="chat-header">
+    <div class="avatar">👨‍🍳</div>
+    <div>
+      <h1>AI 私人厨师</h1>
+      <p id="currentThreadLabel">上传食材图片，获取个性化食谱推荐</p>
+    </div>
+  </div>
+
+  <div class="messages" id="messages">
+    <div class="welcome" id="welcome">
+      <div class="big-icon">🍳</div>
+      <h3>上传食材图片开始吧</h3>
+      <p>我会帮您识别食材并推荐食谱</p>
+    </div>
+  </div>
+
+  <div class="input-area">
+    <div class="input-wrapper">
+      <button class="btn-img" onclick="document.getElementById('fileInput').click()" title="上传图片">📷</button>
+      <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="onFileSelected(event)">
+      <textarea id="input" rows="1" placeholder="描述你有的食材..." onkeydown="onInputKeydown(event)"></textarea>
+      <button class="btn-send" id="sendBtn" onclick="sendMessage()" disabled>发送</button>
+    </div>
+    <div id="previewArea" style="padding:4px 0 0 16px;"></div>
+  </div>
+</div>
+
+<script>
+// ===== 状态 =====
+let currentThreadId = null
+let threads = []
+let uploading = false
+let selectedFile = null
+
+// ===== DOM引用 =====
+const messagesEl = document.getElementById('messages')
+const welcomeEl = document.getElementById('welcome')
+const threadListEl = document.getElementById('threadList')
+const inputEl = document.getElementById('input')
+const sendBtn = document.getElementById('sendBtn')
+const previewArea = document.getElementById('previewArea')
+const currentThreadLabel = document.getElementById('currentThreadLabel')
+
+// ===== 监听输入 =====
+inputEl.addEventListener('input', () => {
+  sendBtn.disabled = !inputEl.value.trim() && !selectedFile
+})
+
+// ===== 发送消息 =====
+function onInputKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+}
+
+// ===== 文件选择 =====
+function onFileSelected(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  selectedFile = file
+  const reader = new FileReader()
+  reader.onload = (ev) => {
+    previewArea.innerHTML = `<img class="img-preview" src="${ev.target.result}">`
+  }
+  reader.readAsDataURL(file)
+  sendBtn.disabled = false
+}
+
+// ===== 上传图片到OSS =====
+async function uploadImage(file) {
+  // 生成唯一文件名
+  const ext = file.name.split('.').pop() || 'jpg'
+  const filename = `upload_${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`
+
+  // 获取预签名URL
+  const resp1 = await fetch(`/api/v1/oss/presign?filename=${filename}`)
+  const data = await resp1.json()
+
+  // 上传到OSS
+  await fetch(data.uploadUrl, {
+    method: 'PUT',
+    body: file,
+    headers: { 'Content-Type': data.contentType }
+  })
+
+  return data.accessUrl
+}
+
+// ===== 发送 =====
+async function sendMessage() {
+  const text = inputEl.value.trim()
+  if (!text && !selectedFile) return
+
+  // 没有thread_id时自动创建
+  if (!currentThreadId) {
+    currentThreadId = 'thread_' + Date.now()
+  }
+
+  // 显示用户消息
+  welcomeEl.style.display = 'none'
+  let userContent = text || '看看这些食材'
+  addMessage(userContent, 'user')
+
+  // 如果有图片，显示图片预览
+  let imageUrl = ''
+  if (selectedFile) {
+    addMessage(`[图片已选择，上传中...]`, 'user')
+    try {
+      imageUrl = await uploadImage(selectedFile)
+      // 替换上传中的提示
+      const msgs = messagesEl.querySelectorAll('.message.user')
+      msgs[msgs.length-1].textContent = `📷 ${userContent}`
+    } catch(e) {
+      addMessage('❌ 图片上传失败，请重试', 'assistant')
+      selectedFile = null
+      previewArea.innerHTML = ''
+      sendBtn.disabled = false
+      return
+    }
+    selectedFile = null
+    previewArea.innerHTML = ''
+  }
+
+  inputEl.value = ''
+  sendBtn.disabled = true
+
+  // 显示loading
+  const loadingMsg = addMessage('思考中...', 'assistant loading')
+
+  // 流式请求
+  try {
+    const resp = await fetch('/api/v1/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text || '看看这些食材',
+        image_url: imageUrl || null,
+        thread_id: currentThreadId
+      })
+    })
+
+    if (!resp.ok) throw new Error('请求失败')
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let fullText = ''
+
+    loadingMsg.classList.remove('loading')
+    loadingMsg.textContent = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value, { stream: true })
+      fullText += chunk
+      loadingMsg.textContent = fullText
+      messagesEl.scrollTop = messagesEl.scrollHeight
+    }
+
+    // 刷新会话列表
+    loadThreads()
+
+  } catch(e) {
+    loadingMsg.classList.remove('loading')
+    loadingMsg.textContent = '❌ 请求失败，请重试'
+  }
+}
+
+// ===== 添加消息 =====
+function addMessage(content, className) {
+  const div = document.createElement('div')
+  div.className = `message ${className}`
+  div.textContent = content
+  messagesEl.appendChild(div)
+  messagesEl.scrollTop = messagesEl.scrollHeight
+  return div
+}
+
+// ===== 加载历史消息 =====
+async function loadMessages(threadId) {
+  currentThreadId = threadId
+  messagesEl.innerHTML = ''
+  welcomeEl.style.display = 'none'
+
+  // 高亮列表项
+  document.querySelectorAll('.thread-item').forEach(el => el.classList.remove('active'))
+  const item = document.querySelector(`[data-thread-id="${threadId}"]`)
+  if (item) item.classList.add('active')
+
+  currentThreadLabel.textContent = `当前会话: ${threadId.substring(0, 20)}...`
+
+  try {
+    const resp = await fetch(`/api/v1/chat/messages?thread_id=${threadId}`)
+    const data = await resp.json()
+
+    if (data.messages && data.messages.length > 0) {
+      for (const msg of data.messages) {
+        const role = msg.role === 'user' ? 'user' : 'assistant'
+        const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+        addMessage(content, role)
+      }
+    } else {
+      welcomeEl.style.display = 'flex'
+    }
+  } catch(e) {
+    addMessage('❌ 加载消息失败', 'assistant')
+  }
+}
+
+// ===== 加载会话列表 =====
+async function loadThreads() {
+  try {
+    const resp = await fetch('/api/v1/chat/threads')
+    const data = await resp.json()
+    threads = data.threads || []
+
+    if (threads.length === 0) {
+      threadListEl.innerHTML = '<div style="text-align:center;color:#ccc;padding:20px;font-size:13px;">暂无历史会话</div>'
+      return
+    }
+
+    threadListEl.innerHTML = ''
+    for (const t of threads) {
+      const div = document.createElement('div')
+      div.className = 'thread-item'
+      if (t.thread_id === currentThreadId) div.classList.add('active')
+      div.dataset.threadId = t.thread_id
+
+      // 获取该会话的第一条消息作为显示名称
+      const shortId = t.thread_id.length > 18 ? t.thread_id.substring(0, 18) + '...' : t.thread_id
+
+      div.innerHTML = `
+        <span class="icon">📝</span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${shortId}</span>
+        <button class="delete-btn" onclick="event.stopPropagation();deleteThread('${t.thread_id}')">×</button>
+      `
+      div.onclick = () => loadMessages(t.thread_id)
+      threadListEl.appendChild(div)
+    }
+  } catch(e) {
+    threadListEl.innerHTML = '<div style="text-align:center;color:#ef4444;padding:20px;font-size:13px;">加载失败</div>'
+  }
+}
+
+// ===== 新建会话 =====
+function newThread() {
+  currentThreadId = 'thread_' + Date.now()
+  messagesEl.innerHTML = ''
+  welcomeEl.style.display = ''
+  currentThreadLabel.textContent = '新会话'
+  inputEl.value = ''
+  sendBtn.disabled = true
+  selectedFile = null
+  previewArea.innerHTML = ''
+
+  document.querySelectorAll('.thread-item').forEach(el => el.classList.remove('active'))
+
+  // 刷新列表后自动选中新会话要靠下次发送时创建
+  loadThreads()
+}
+
+// ===== 删除会话 =====
+async function deleteThread(threadId) {
+  if (!confirm('确定删除这个会话吗？')) return
+  try {
+    await fetch(`/api/v1/chat/messages?thread_id=${threadId}`, { method: 'DELETE' })
+    if (currentThreadId === threadId) {
+      currentThreadId = null
+      messagesEl.innerHTML = ''
+      welcomeEl.style.display = ''
+      currentThreadLabel.textContent = '上传食材图片，获取个性化食谱推荐'
+    }
+    loadThreads()
+  } catch(e) {
+    alert('删除失败')
+  }
+}
+
+// ===== 初始化 =====
+loadThreads()
+
+// 自动调整textarea高度
+document.querySelectorAll('textarea').forEach(ta => {
+  ta.addEventListener('input', function() {
+    this.style.height = 'auto'
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px'
+  })
+})
+</script>
+
+</body>
+</html>

@@ -1,0 +1,40 @@
+# 上传的图片文件
+app/static/uploads/
+
+# 环境变量
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.idea/
+
+# LangGraph
+.langgraph_api/
+
+# 向量数据库（重建即可，不需要提交）
+app/rag/chroma_db/
+
+# SQLite 数据库
+app/db/
+
+# 临时文件
+app/rag/recipe/generate_recipes.py
+
+# 测试和旧的 rag 项目文件夹
+rag项目/
+测试/
+*.db
+*.db-shm
+*.db-wal
+
+# 其他
+uv.lock
+屏幕截图*.png
+
+# 原始大数据集（太大，不上传）
+app/rag/recipe/*万条*.json
+app/rag/recipe/*.rar

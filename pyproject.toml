@@ -1,0 +1,28 @@
+[project]
+name = "aiagent1"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "alibabacloud-oss-v2>=1.3.0",
+    "dashscope>=1.25.17",
+    "document>=1.0",
+    "fastapi>=0.136.1",
+    "ipykernel>=7.2.0",
+    "langchain-chroma>=1.1.0",
+    "langchain-community>=0.4.2",
+    "langchain-core>=1.3.2",
+    "langchain-openai>=1.2.1",
+    "langchain-tavily",
+    "langchain-text-splitters>=1.1.2",
+    "langgraph-checkpoint-postgres>=3.0.5",
+    "langgraph-checkpoint-sqlite>=3.0.3",
+    "langgraph-cli[inmem]>=0.4.24",
+    "logger>=1.4",
+    "python-dotenv>=1.2.2",
+    "requests>=2.33.1",
+    "streamlit",
+]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
