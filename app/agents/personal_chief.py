@@ -86,8 +86,10 @@ def supervisor(state:ChefState) -> dict:
 def route_by_intent(state: ChefState) -> str:
     intent = state.get("intent", "recipe")
     if "nutrition" in intent:
-        return "analyze"  # 先去识别食材
-    return "analyze"
+        return "nutrition_agent"  # 直接走营养分析
+    if "fitness" in intent:
+        return "fitness_agent"    # 直接走健身
+    return "analyze"  # 做菜模式才识别食材
 
 #节点1：识别食材
 def analyze_ingredients(state:ChefState):
@@ -129,13 +131,39 @@ def fitness_agent(state: ChefState) -> dict:
     """根据健身目标推荐食谱"""
     last_msg = state["messages"][-1]
     ingredients = state.get("ingredients", [])
+
+    # 如果 state 里没有食材，从用户消息中提取
+    if not ingredients or ingredients[0] in ("未知", ""):
+        extract = model.invoke([
+            ("system", "从用户消息中提取食材清单，用逗号分隔。如果没有食材，返回'无'。"),
+            ("human", last_msg.content)
+        ])
+        extracted = [i.strip() for i in extract.content.split(",")]
+        if extracted and extracted[0] != "无":
+            ingredients = extracted
+
+    # 搜索健身食谱
+    if ingredients and ingredients[0] not in ("无", ""):
+        query = f"健身餐 {','.join(ingredients)} 高蛋白 低脂 食谱"
+        logger.info(f"搜索健身食谱：{query}")
+        web_results = web_search.invoke(query)
+        if isinstance(web_results, str):
+            search_context = web_results[:500]
+        elif isinstance(web_results, list):
+            search_context = "\n".join([str(r)[:300] for r in web_results[:3]])
+        else:
+            search_context = ""
+    else:
+        search_context = ""
+
     response = model.invoke([
-        ("system",
-         "你是一个健身营养专家。根据用户的健身目标和食材推荐食谱。"
-         "输出格式：食谱名称 | 蛋白质含量 | 适合场景 |关键做法。推荐高蛋白、低脂、适合增肌/减脂的食谱。"
-         "简洁输出1-2 个最佳推荐。"),
-         ("human", f"食材：{', '.join(ingredients) if ingredients
-        else '未知'}\n用户说：{last_msg.content}")
+        ("system", "你是一个健身营养专家。根据用户的健身目标和食材推荐食谱。"
+                   "如果用户没提供具体食材，直接给出通用健身餐计划。"
+                   "输出要实用、具体，包含蛋白质/碳水/脂肪含量和简单做法。"
+                   "可以按早餐/午餐/晚餐/加餐给出全日计划。"),
+        ("human", f"食材：{', '.join(ingredients) if ingredients else '无'}\n"
+                  f"搜索结果参考：{search_context}\n"
+                  f"用户说：{last_msg.content}")
     ])
     return {"messages": [AIMessage(content=response.content)]}
 
@@ -223,7 +251,7 @@ builder.add_node("output", score_and_output)
 builder.set_entry_point("supervisor")
 builder.add_conditional_edges("supervisor",
                                route_by_intent,
-                               {"nutrition_agent": "nutrition_agent", "analyze": "analyze"})
+                               {"nutrition_agent": "nutrition_agent", "fitness_agent": "fitness_agent", "analyze": "analyze"})
 
 # 营养分析模式 → 直接输出
 builder.add_edge("nutrition_agent", END)
