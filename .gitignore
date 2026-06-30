@@ -25,8 +25,8 @@ app/db/
 app/rag/recipe/generate_recipes.py
 
 # 测试和旧的 rag 项目文件夹
-rag项目/
-测试/
+../ai智能体/rag项目/
+../ai智能体/测试/
 *.db
 *.db-shm
 *.db-wal

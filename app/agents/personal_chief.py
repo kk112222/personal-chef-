@@ -10,6 +10,7 @@ load_dotenv()
 from langchain.messages import HumanMessage, AIMessageChunk,AIMessage
 from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.types import interrupt,Command
 #2 web搜索工具，使用tavily
 web_search = TavilySearch(
     max_results=6,
@@ -58,6 +59,7 @@ system_prompt = """
 1.  请严格按照上述流程执行，优先调用 web_search 工具搜索食谱，搜索不到有效结果时，再根据用户食材清单合理创作食谱。
 2.  所有食谱必须以用户提供的食材为核心，不主动要求用户额外采购稀有食材。
 3.  输出语言保持友好、接地气，避免过于专业晦涩的术语，让用户能轻松看懂并上手。
+4.  **简洁输出**：回复要简明扼要，直接给出食谱名称、评分和关键步骤，避免大段表格和重复描述。推荐 1-2 个最佳食谱即可。
 """
 
 #4创建agent
@@ -65,6 +67,27 @@ class ChefState(MessagesState):
     ingredients: list[str]  # 你自定义的字段
     recipes: list[dict]
     scores: list[float]
+    user_preferences: list[dict] #用户忌口/偏好
+    intent: str  # Supervisor 判断的用户意图
+
+def supervisor(state:ChefState) -> dict:
+    """判断用户意图：做菜还是分析营养"""
+    last_msg = state["messages"][-1]
+    response = model.invoke(
+        [("system","判断用户意图，只返回一个词：'recipe'（想做菜）或'nutrition'（想分析营养/卡路里）"
+                   "或'fitness'(健身饮食/增肌/减脂)"),
+         ("human", last_msg.content)
+         ])
+    intent = response.content.strip().lower()
+    logger.info(f"用户意图: {intent}")
+    return {"intent": intent}
+
+#路由判断函数
+def route_by_intent(state: ChefState) -> str:
+    intent = state.get("intent", "recipe")
+    if "nutrition" in intent:
+        return "analyze"  # 先去识别食材
+    return "analyze"
 
 #节点1：识别食材
 def analyze_ingredients(state:ChefState):
@@ -89,6 +112,33 @@ def analyze_ingredients(state:ChefState):
         return {"ingredients": []}
     return {"ingredients": ingredients}
 
+#营养agent节点
+def nutrition_agent(state: ChefState) -> dict:
+    """分析食材的营养成分"""
+    ingredients = state.get("ingredients", [])
+    if not ingredients:
+        return {"messages": [AIMessage(content="请先提供食材信息")]}
+    response = model.invoke([
+        ("system", "你是一个营养师。分析食材的营养价值，给出卡路里、蛋白质、脂肪等数据。简洁输出。"),
+        ("human", f"食材：{','.join(ingredients)}")
+    ])
+    return {"messages": [AIMessage(content=response.content)]}
+
+#健身饮食agent
+def fitness_agent(state: ChefState) -> dict:
+    """根据健身目标推荐食谱"""
+    last_msg = state["messages"][-1]
+    ingredients = state.get("ingredients", [])
+    response = model.invoke([
+        ("system",
+         "你是一个健身营养专家。根据用户的健身目标和食材推荐食谱。"
+         "输出格式：食谱名称 | 蛋白质含量 | 适合场景 |关键做法。推荐高蛋白、低脂、适合增肌/减脂的食谱。"
+         "简洁输出1-2 个最佳推荐。"),
+         ("human", f"食材：{', '.join(ingredients) if ingredients
+        else '未知'}\n用户说：{last_msg.content}")
+    ])
+    return {"messages": [AIMessage(content=response.content)]}
+
 # 节点2：追问食材
 def clarify(state:ChefState) -> dict:
     response =model.invoke([("system", "你是私厨助手。用户没提供清楚食材信息，请礼貌地问用户具体有什么食材。"),
@@ -96,8 +146,15 @@ def clarify(state:ChefState) -> dict:
     logger.info("食材不清晰，追问用户")
     return {"messages": [AIMessage(content=response.content)]}
 
-# 路由函数
-def should_retrieve_or_clarify(state:ChefState) -> str:
+# 路由函数：判断意图 + 食材是否清晰
+def after_analyze(state: ChefState) -> str:
+    # 如果是营养分析模式 → 走营养 Agent
+    intent = state.get("intent", "recipe")
+    if "nutrition" in intent:
+        return "nutrition_agent"
+    if "fitness" in intent:
+        return "fitness_agent"
+    # 食材不清晰 → 追问
     if not state.get("ingredients") or len(state["ingredients"]) == 0:
         return "clarify"
     return "retrieve"
@@ -129,6 +186,12 @@ def retrieve_recipes(state: ChefState) -> dict:
                         "url":""})
     logger.info(f"搜索到 {len(recipes)}个食谱(网页{len(web_results)} + 本地)")
     return {"recipes": recipes}
+
+#节点 偏好/忌口节点
+def ask_preferences(state:ChefState) -> dict:
+    """询问用户饮食偏好，hitl暂停点"""
+    user_input = interrupt("有没有什么忌口或饮食爱好？\n列如：不吃 辣、素食、海鲜过敏、没有忌口")
+    return {"user_preferences": user_input or "无"}
 # 节点4：评分输出
 def score_and_output(state: ChefState) -> dict:
     """评分排序，生成最终回答"""
@@ -137,44 +200,80 @@ def score_and_output(state: ChefState) -> dict:
         f"- {r['title']}: {r['content'][:200]}"
         for r in state["recipes"]
     ])
+    preferences = state.get("user_preferences","无")
     response = model.invoke([("system", system_prompt),
-                             ("human",f"我先有的食材：{ingredients_str}\n\n搜索到的候选食谱；{recipes_str}\n\n请按流程排序输出")
+                             ("human",f"我先有的食材：{ingredients_str}\n\n"
+                                      f"\n用户饮食偏好：{preferences}\n\n"
+                                      f"搜索到的候选食谱；{recipes_str}\n\n请按流程排序输出,注意避开用户忌口")
                              ])
     logger.info("食谱推荐完成")
     return {"messages": [AIMessage(content=response.content)]}
     # 返回 {"messages": [AIMessage(...)]}
 builder = StateGraph(ChefState)
-builder.add_node("clarify",clarify)
-builder.add_node("analyze",analyze_ingredients)
-builder.add_node("retrieve",retrieve_recipes)
-builder.add_node("output",score_and_output)
+builder.add_node("supervisor", supervisor)
+builder.add_node("fitness_agent", fitness_agent)
+builder.add_node("clarify", clarify)
+builder.add_node("analyze", analyze_ingredients)
+builder.add_node("nutrition_agent", nutrition_agent)
+builder.add_node("retrieve", retrieve_recipes)
+builder.add_node("ask_prefs", ask_preferences)
+builder.add_node("output", score_and_output)
 
-builder.set_entry_point("analyze")
+# Supervisor 先判断意图
+builder.set_entry_point("supervisor")
+builder.add_conditional_edges("supervisor",
+                               route_by_intent,
+                               {"nutrition_agent": "nutrition_agent", "analyze": "analyze"})
+
+# 营养分析模式 → 直接输出
+builder.add_edge("nutrition_agent", END)
+
+# 分析后：营养模式 → nutrition_agent，否则走做菜流程
 builder.add_conditional_edges("analyze",
-                              should_retrieve_or_clarify,
-                              {"clarify":"clarify","retrieve":"retrieve"})
-builder.add_edge("clarify",END)
-builder.add_edge("retrieve","output")
-builder.add_edge("output",END)
+                                after_analyze,
+                                {"nutrition_agent": "nutrition_agent",
+                                 "clarify": "clarify",
+                                 "retrieve": "retrieve",
+                                 "fitness_agent": "fitness_agent"})
+builder.add_edge("fitness_agent", END)
+builder.add_edge("clarify", END)
+builder.add_edge("retrieve", "ask_prefs")
+builder.add_edge("ask_prefs", "output")
+builder.add_edge("output", END)
+
 agent = builder.compile(checkpointer=checkpointer)
 #流式对话
 async def stream_agent_response(prompt: str, image: str, thread_id: str):
     logger.info(f"[用户]: {prompt}, image: {image}, thread_id: {thread_id}")
     try:
-        if not image or image.strip() == "":
-            message = HumanMessage(content=prompt)
+        # 检查是否在等待恢复（有中断挂起）
+        current_state = agent.get_state({"configurable":
+                                             {"thread_id": thread_id}})
+        if current_state and current_state.next:
+            # 有中断 → 用 Command 恢复执行
+            for chunk,metadata in agent.stream(
+                Command(resume=prompt),
+                {"configurable":{"thread_id": thread_id}},
+                stream_mode="messages",
+            ):
+                if isinstance(chunk,AIMessageChunk) and chunk.content:
+                    yield chunk.content
         else:
-            message = HumanMessage(content=[
-                {"type": "image", "url": image},
-                {"type": "text", "text": prompt}
-            ])
-        for chunk, metadata in agent.stream(
-                {"messages": [message]},
-                {"configurable": {"thread_id": thread_id}},
-                stream_mode="messages"
-        ):
-            if isinstance(chunk, AIMessageChunk) and chunk.content:
-                yield chunk.content
+            # 正常流程
+            if not image or image.strip()== "":
+                message = HumanMessage(content=prompt)
+            else:
+                message = HumanMessage(content=[
+                    {"type": "image","url":image},
+                    {"type": "text","text":prompt},
+                ])
+            for chunk, metadata in agent.stream(
+                    {"messages": [message]},
+                    {"configurable": {"thread_id": thread_id}},
+                    stream_mode="messages"
+            ):
+                if isinstance(chunk, AIMessageChunk) and chunk.content:
+                    yield chunk.content
     except Exception as e:
         logger.error(f"\n[错误]: {str(e)}")
         yield "信息检索失败，试试看手动输入食物列表？"
