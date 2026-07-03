@@ -2,15 +2,15 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# 安装uvicorn和项目依赖
+# 复制依赖文件并安装（先复制 pyproject 可以让 docker 缓存依赖层）
 COPY pyproject.toml .
-RUN pip install --no-cache-dir uvicorn && pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir uvicorn fastapi python-dotenv requests langchain-core langchain-openai langchain-tavily langchain-chroma langchain-community langchain-text-splitters langgraph-checkpoint-sqlite alibabacloud-oss-v2 dashscope
+
+# 再复制代码
+COPY . .
 
 # 创建必要目录
 RUN mkdir -p app/db app/rag/chroma_db app/static/uploads
-
-# 复制代码
-COPY . .
 
 # 暴露端口
 EXPOSE 8001

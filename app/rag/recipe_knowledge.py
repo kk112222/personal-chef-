@@ -34,6 +34,10 @@ def build_vector_store():
 @tool
 def search_recipes(query: str) -> str:
     """根据食材或菜名搜索本地菜谱库"""
+    # 如果向量库不存在，自动构建
+    if not os.path.exists(os.path.join(CHROMA_PATH, "chroma.sqlite3")):
+        print("[RAG] 向量库不存在，自动构建中...")
+        build_vector_store()
     vector_store = Chroma(
             embedding_function=embeddings,
             persist_directory=CHROMA_PATH

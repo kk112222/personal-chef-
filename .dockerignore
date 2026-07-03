@@ -6,7 +6,6 @@ __pycache__/
 .git/
 .gitignore
 *.md
-app/rag/chroma_db/
 app/db/
 app/rag/recipe/食谱、菜谱数据库141M17万条数据.json
 app/rag/recipe/*.rar
