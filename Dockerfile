@@ -17,5 +17,5 @@ RUN mkdir -p app/db app/rag/chroma_db app/static/uploads
 # 暴露端口
 EXPOSE 8001
 
-# 启动
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
+# 启动（使用 Railway 的 PORT 环境变量，默认 8001）
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001}

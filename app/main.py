@@ -56,4 +56,5 @@ async def serve_frontend(path: str):
 if __name__ == "__main__":
     import uvicorn
     # 启动命令：python -m app.main
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8001, reload=True)
+    port = int(os.getenv("PORT", "8001"))
+    uvicorn.run("app.main:app", host="127.0.0.1", port=port, reload=True)
