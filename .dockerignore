@@ -1,0 +1,18 @@
+# 不要打包到镜像里的文件
+.venv/
+__pycache__/
+*.pyc
+.env
+.git/
+.gitignore
+*.md
+app/rag/chroma_db/
+app/db/
+app/rag/recipe/食谱、菜谱数据库141M17万条数据.json
+app/rag/recipe/*.rar
+面试问答手册.md
+generate_resume.py
+fill_resume.py
+resume.html
+jianli-代洋.docx
+jianli-0046蓝色好看的简历模板.docx
