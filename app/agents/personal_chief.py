@@ -23,8 +23,12 @@ model = ChatOpenAI(
     api_key=os.getenv("DASHSCOPE_API_KEY")
 )
 
+# 数据库路径：先取环境变量，没有就用默认路径
+DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "..", "db", "personal_chief.db"))
+
 #记忆化
-connection = sqlite3.connect(r"D:\pycharm\aiagent1\app\db\personal_chief.db",check_same_thread=False)
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+connection = sqlite3.connect(DB_PATH, check_same_thread=False)
 checkpointer = SqliteSaver(connection)
 checkpointer.setup()
 
