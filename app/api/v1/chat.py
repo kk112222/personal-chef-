@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from app.models.schemas import ChatRequest
-from app.agents.personal_chief import stream_agent_response,get_messages,clear_messages
+from app.agents.personal_chief import stream_agent_response,get_messages,clear_messages,list_threads
 router = APIRouter()
 
 
@@ -29,3 +29,9 @@ async def clear_chat_messages(thread_id: str):
     """清空历史消息"""
     clear_messages(thread_id)
     return {"messages": True}
+
+@router.get("/chat/threads")
+async def get_threads():
+    """获取所有历史会话"""
+    threads = list_threads()
+    return {"threads": threads}
